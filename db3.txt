@@ -684,20 +684,20 @@ class MainWindow(QMainWindow):
             where id=%s
         """
 
-        # список параметров: тут тоже ровно 12 элементов?
+        
         params = (
-            data[0],  # 1. артикул
-            data[2],  # 2. имя
-            data[3],  # 3. описание
-            data[6],  # 4. цена
-            data[7],  # 5. ед изм
-            data[8],  # 6. кол во
-            disc_val,  # 7. скидка числом
-            data[10],  # 8. фото путь
-            cat_id,  # 9. айди категории
-            man_id,  # 10. айди производителя
-            sup_id,  # 11. айди поставщика
-            old_product[0]  # 12. уникальный айди из where
+            data[0],  # артикул
+            data[2],  # имя
+            data[3],  # описание
+            data[6],  # цена
+            data[7],  # ед изм
+            data[8],  # кол во
+            disc_val,  # скидка числом
+            data[10],  # фото путь
+            cat_id,  # айди категории
+            man_id,  # айди производителя
+            sup_id,  # айди поставщика
+            old_product[0]  # уникальный айди из where
         )
 
         db.execute(sql, params)
@@ -753,7 +753,7 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(frame)
 
         left = QVBoxLayout()
-        left.addWidget(QLabel("ID: " + str(order[0])))
+        left.addWidget(QLabel("Номер заказа: " + str(order[0])))
         left.addWidget(QLabel("<b>" + str(order[1]) + "</b>"))
         left.addWidget(QLabel("Статус: " + str(order[2])))
         left.addWidget(QLabel("Адрес: " + str(order[3])))
