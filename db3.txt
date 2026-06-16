@@ -1,0 +1,737 @@
+drop database if exists shop1;
+create database shop1;
+use shop1;
+
+create table categories (
+    id int primary key auto_increment,
+    name varchar(50) not null
+);
+
+create table manufacturers (
+    id int primary key auto_increment,
+    name varchar(50) not null
+);
+
+create table suppliers (
+    id int primary key auto_increment,
+    name varchar(50) not null
+);
+
+create table order_statuses (
+    id int primary key auto_increment,
+    name varchar(50) not null
+);
+
+create table users (
+    id int primary key auto_increment,
+    login varchar(50) not null unique,
+    password varchar(50) not null,
+    role varchar(50) not null
+);
+
+create table products (
+    id int primary key auto_increment,
+    article varchar(50) not null,
+    name varchar(50) not null,
+    description varchar(255) not null,
+    price decimal(10,2) not null,
+    unit varchar(50) not null,
+    stock int not null,
+    discount decimal(5,2) default 0,
+    image_path varchar(255),
+    category_id int,
+    manufacturer_id int,
+    supplier_id int,
+    foreign key (category_id) references categories(id) on delete set null,
+    foreign key (manufacturer_id) references manufacturers(id) on delete set null,
+    foreign key (supplier_id) references suppliers(id) on delete set null
+);
+
+create table orders (
+    id int primary key auto_increment,
+    user_id int not null,
+    status_id int not null,
+    address varchar(255) not null,
+    order_date date not null,
+    delivery_date date not null,
+    foreign key (user_id) references users(id),
+    foreign key (status_id) references order_statuses(id)
+);
+
+create table order_items (
+    order_id int,
+    product_id int,
+    quantity int not null default 1,
+    primary key (order_id, product_id),
+    foreign key (order_id) references orders(id) on delete cascade,
+    foreign key (product_id) references products(id) on delete restrict
+);
+
+insert into categories values (1, 'Категория');
+
+insert into manufacturers values (1, 'Производитель');
+
+insert into suppliers values (1, 'Поставщик');
+
+insert into order_statuses values (1, 'Новый');
+
+insert into users values (1, 'client', '1234', 'Клиент');
+
+insert into products values (1, 'Артикул', 'Имя', 'Описание', 500.00, 'шт', 12, 0, '', 1, 1, 1);
+
+insert into orders values (1, 1, 1, 'Адрес', '2026-01-01', '2026-01-01');
+
+insert into order_items values (1, 1, 1);
+
+
+
+
+
+
+
+
+import pymysql
+
+class Databasee:
+    def __init__(self):
+        self.conn = pymysql.connect(
+            host="localhost",
+            user="root",
+            password="",
+            db="shop1",
+            cursorclass=pymysql.cursors.Cursor,
+            charset="utf8mb4"
+        )
+
+    def select_all(self, query, params=()):
+        cursor = self.conn.cursor()
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+
+    def execute(self, query, params=()):
+        cursor = self.conn.cursor()
+        cursor.execute(query, params)
+        self.conn.commit()
+        cursor.close()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import sys
+from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import *
+from db2 import Databasee
+
+db = Databasee()
+main_window = None
+
+def get_discount_number(text):
+    # извлечение скидки: какое там число?
+    try:
+        return int(float(text))
+    except:
+        return 0
+
+def get_or_create_id(table, name_value):
+    # поиск айди: есть ли уже такая запись в справочнике?
+    res = db.select_all(f"select id from {table} where name = %s", (name_value,))
+    if res:
+        return res[0][0]
+    db.execute(f"insert into {table} (name) values (%s)", (name_value,))
+    res = db.select_all(f"select id from {table} where name = %s", (name_value,))
+    return res[0][0]
+
+
+class LoginDialog(QDialog):
+    def __init__(self):
+        super().__init__()
+
+        self.selected_user = ""
+        self.selected_role = ""
+
+        self.setWindowTitle("Вход")
+        self.resize(250, 250)
+
+        self.login_edit = QLineEdit()
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+
+        login_btn = QPushButton("Войти")
+        guest_btn = QPushButton("Гость")
+        login_btn.clicked.connect(self.try_login)
+        guest_btn.clicked.connect(self.login_guest)
+
+        form = QFormLayout(self)
+        form.addRow("Логин", self.login_edit)
+        form.addRow("Пароль", self.password_edit)
+
+        buttons = QHBoxLayout()
+        buttons.addWidget(login_btn)
+        buttons.addWidget(guest_btn)
+
+        form.addRow(buttons)
+
+    def try_login(self):
+        # авторизация пользователя: подходят ли логин и новый пароль?
+        login = self.login_edit.text().strip()
+        password = self.password_edit.text().strip()
+
+        if login == "admin" and password == "admin123":
+            self.selected_user = "admin"
+            self.selected_role = "Администратор"
+            self.accept()
+            return
+
+        if login == "manager" and password == "manager123":
+            self.selected_user = "manager"
+            self.selected_role = "Менеджер"
+            self.accept()
+            return
+
+        if login == "client" and password == "client123":
+            self.selected_user = "client"
+            self.selected_role = "Пользователь"
+            self.accept()
+            return
+
+    def login_guest(self):
+        # вход гостя: пускать ли без авторизации?
+        self.selected_user = "guest"
+        self.selected_role = "Гость"
+        self.accept()
+
+
+class ProductDialog(QDialog):
+    def __init__(self, product=None):
+        super().__init__()
+
+        self.setWindowTitle("Товар")
+        self.resize(400, 400)
+
+        self.article_edit = QLineEdit()
+        self.category_edit = QLineEdit()
+        self.name_edit = QLineEdit()
+        self.description_edit = QLineEdit()
+        self.manufacturer_edit = QLineEdit()
+        self.supplier_edit = QLineEdit()
+        self.price_edit = QDoubleSpinBox()
+        self.price_edit.setMaximum(7777)
+        self.price_edit.setDecimals(2)
+        self.unit_edit = QLineEdit()
+        self.stock_edit = QSpinBox()
+        self.stock_edit.setMaximum(7777)
+        self.discount_edit = QLineEdit()
+        self.photo_edit = QLineEdit()
+
+        photo_btn = QPushButton("Фото")
+        save_btn = QPushButton("Сохранить")
+        cancel_btn = QPushButton("Отмена")
+        photo_btn.clicked.connect(self.choose_photo)
+        save_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+
+        form = QFormLayout()
+        form.addRow("Артикул", self.article_edit)
+        form.addRow("Категория", self.category_edit)
+        form.addRow("Название", self.name_edit)
+        form.addRow("Описание", self.description_edit)
+        form.addRow("Производитель", self.manufacturer_edit)
+        form.addRow("Поставщик", self.supplier_edit)
+        form.addRow("Цена", self.price_edit)
+        form.addRow("Ед изм", self.unit_edit)
+        form.addRow("Кол во", self.stock_edit)
+        form.addRow("Скидка", self.discount_edit)
+        form.addRow("Фото", self.photo_edit)
+        form.addRow("", photo_btn)
+
+        buttons = QHBoxLayout()
+        buttons.addWidget(save_btn)
+        buttons.addWidget(cancel_btn)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addLayout(buttons)
+
+        if product:
+            # загрузка полей формы: редактируем ли старый товар?
+            self.article_edit.setText(str(product[1]))
+            self.category_edit.setText(str(product[2]))
+            self.name_edit.setText(str(product[3]))
+            self.description_edit.setText(str(product[4]))
+            self.manufacturer_edit.setText(str(product[5]))
+            self.supplier_edit.setText(str(product[6]))
+            self.price_edit.setValue(float(product[7]))
+            self.unit_edit.setText(str(product[8]))
+            self.stock_edit.setValue(int(product[9]))
+            self.discount_edit.setText(str(product[10]))
+            self.photo_edit.setText(str(product[11]))
+
+    def choose_photo(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Фото", "", "Images (*.png *.jpg *.jpeg)")
+        if path:
+            self.photo_edit.setText(path)
+
+    def get_data(self):
+        article = self.article_edit.text().strip()
+        category = self.category_edit.text().strip()
+        name = self.name_edit.text().strip()
+        description = self.description_edit.text().strip()
+        manufacturer = self.manufacturer_edit.text().strip()
+        supplier = self.supplier_edit.text().strip()
+        price = self.price_edit.value()
+        unit = self.unit_edit.text().strip()
+        stock = self.stock_edit.value()
+        discount = self.discount_edit.text().strip()
+        photo = self.photo_edit.text().strip()
+
+        if discount == "":
+            discount = "0"
+
+        return (article, category, name, description, manufacturer, supplier, price, unit, stock, discount, photo)
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, role, username):
+        super().__init__()
+
+        self.role = role
+        self.username = username
+
+        self.setWindowTitle("Магазин")
+        self.resize(1200, 800)
+
+        center = QWidget()
+        self.setCentralWidget(center)
+
+        layout = QVBoxLayout(center)
+
+        top_layout = QHBoxLayout()
+        user_label = QLabel(f"Пользователь {self.username} | Роль {self.role}")
+        back_btn = QPushButton("Назад")
+        back_btn.clicked.connect(self.go_back)
+        top_layout.addWidget(user_label)
+        top_layout.addStretch()
+        top_layout.addWidget(back_btn)
+
+        self.tabs = QTabWidget()
+        self.status_label = QLabel("")
+
+        layout.addLayout(top_layout)
+        layout.addWidget(self.tabs)
+        layout.addWidget(self.status_label)
+
+        self.refresh_tab()
+
+    def set_status(self, text):
+        self.status_label.setText(text)
+
+    def refresh_tab(self):
+        index = self.tabs.currentIndex()
+        self.tabs.clear()
+
+        self.tabs.addTab(self.product_tab(), "Товары")
+
+        if self.role in ["Администратор", "Менеджер"]:
+            self.tabs.addTab(self.order_tab(), "Заказы")
+
+        if index < self.tabs.count():
+            self.tabs.setCurrentIndex(index)
+
+    def clear_layout(self, layout):
+        # очистка разметки: остались ли старые виджеты?
+        while layout.count():
+            layout.takeAt(0).widget().deleteLater()
+
+    def product_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        top_layout = QHBoxLayout()
+
+        self.search_edit = None
+        self.sort_combo = None
+        self.price_combo = None
+        self.discount_combo = None
+        self.supplier_combo = None
+
+        if self.role in ["Администратор", "Менеджер"]:
+            self.search_edit = QLineEdit()
+            self.search_edit.setPlaceholderText("Поиск")
+            self.search_edit.textChanged.connect(self.show_product)
+            top_layout.addWidget(self.search_edit)
+
+            self.sort_combo = QComboBox()
+            self.sort_combo.addItem("Без сорт. количества")
+            self.sort_combo.addItem("Количество по возрастанию")
+            self.sort_combo.addItem("Количество по убыванию")
+            top_layout.addWidget(self.sort_combo)
+
+            self.price_combo = QComboBox()
+            self.price_combo.addItem("Без сорт. цены")
+            self.price_combo.addItem("Цена по возрастанию")
+            self.price_combo.addItem("Цена по убыванию")
+            top_layout.addWidget(self.price_combo)
+
+            self.discount_combo = QComboBox()
+            self.discount_combo.addItem("Без сорт. скидки")
+            self.discount_combo.addItem("Скидка по возрастанию")
+            self.discount_combo.addItem("Скидка по убыванию")
+            top_layout.addWidget(self.discount_combo)
+
+            # сброс конфликтов: как переключать режимы без багов?
+            def handle_sort_change():
+                sender = self.sender()
+                if sender == self.sort_combo and self.sort_combo.currentIndex() != 0:
+                    self.price_combo.blockSignals(True)
+                    self.discount_combo.blockSignals(True)
+                    self.price_combo.setCurrentIndex(0)
+                    self.discount_combo.setCurrentIndex(0)
+                    self.price_combo.blockSignals(False)
+                    self.discount_combo.blockSignals(False)
+                elif sender == self.price_combo and self.price_combo.currentIndex() != 0:
+                    self.sort_combo.blockSignals(True)
+                    self.discount_combo.blockSignals(True)
+                    self.sort_combo.setCurrentIndex(0)
+                    self.discount_combo.setCurrentIndex(0)
+                    self.sort_combo.blockSignals(False)
+                    self.discount_combo.blockSignals(False)
+                elif sender == self.discount_combo and self.discount_combo.currentIndex() != 0:
+                    self.sort_combo.blockSignals(True)
+                    self.price_combo.blockSignals(True)
+                    self.sort_combo.setCurrentIndex(0)
+                    self.price_combo.setCurrentIndex(0)
+                    self.sort_combo.blockSignals(False)
+                    self.price_combo.blockSignals(False)
+                self.show_product()
+
+            self.sort_combo.currentTextChanged.connect(handle_sort_change)
+            self.price_combo.currentTextChanged.connect(handle_sort_change)
+            self.discount_combo.currentTextChanged.connect(handle_sort_change)
+
+            self.supplier_combo = QComboBox()
+            self.supplier_combo.addItem("Все поставщики")
+
+            # сбор поставщиков: какие уникальные имена есть?
+            suppliers = db.select_all("select name from suppliers order by name")
+            for row in suppliers:
+                self.supplier_combo.addItem(str(row[0]))
+
+            self.supplier_combo.currentTextChanged.connect(self.show_product)
+            top_layout.addWidget(self.supplier_combo)
+
+            if self.role == "Администратор":
+                add = QPushButton("Добавить товар")
+                add.clicked.connect(self.add_product)
+                top_layout.addWidget(add)
+
+        layout.addLayout(top_layout)
+
+        self.product_layout = QVBoxLayout()
+        content = QWidget()
+        content.setLayout(self.product_layout)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+
+        layout.addWidget(scroll)
+        self.show_product()
+        return page
+
+    def product_card(self, product):
+        frame = QFrame()
+        frame.setFrameShape(QFrame.Shape.Box)
+
+        discount = get_discount_number(product[10])
+        stock = int(product[9])
+
+        if discount > 15:
+            frame.setStyleSheet("background: green")
+        elif stock <= 0 and discount == 0:
+            frame.setStyleSheet("background: lightblue")
+        else:
+            frame.setStyleSheet("")
+
+        layout = QHBoxLayout(frame)
+
+        photo = QLabel("Фото")
+        photo.setFixedWidth(120)
+        photo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        photo.setStyleSheet("border:1px solid gray")
+
+        if product[11]:
+            photo.setPixmap(QPixmap(product[11]).scaled(100, 70))
+
+        center = QVBoxLayout()
+        center.addWidget(QLabel(f"<b>{product[2]} {product[3]}</b>"))
+        center.addWidget(QLabel("Описание: " + str(product[4])))
+        center.addWidget(QLabel("Производитель: " + str(product[5])))
+        center.addWidget(QLabel("Поставщик: " + str(product[6])))
+        center.addWidget(QLabel(f"Цена: <s>{product[7]}</s> {product[7] - discount}" if discount else f"Цена: {product[7]}"))
+        center.addWidget(QLabel("Ед изм: " + str(product[8])))
+        center.addWidget(QLabel("Кол во: " + str(product[9])))
+
+        discount_lbl = QLabel("Скидка\n" + str(product[10]) + "%")
+        discount_lbl.setFixedWidth(120)
+        discount_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        discount_lbl.setStyleSheet("border:1px solid gray")
+        discount_lbl.setWordWrap(True)
+
+        right = QVBoxLayout()
+        if self.role == "Администратор":
+            b1 = QPushButton("Изменить товар")
+            b2 = QPushButton("Удалить товар")
+
+            b1.clicked.connect(lambda: self.edit_product(product))
+            b2.clicked.connect(lambda: self.delete_product(product))
+
+            right.addWidget(b1)
+            right.addWidget(b2)
+
+        right.addStretch()
+
+        layout.addWidget(photo)
+        layout.addLayout(center)
+        layout.addWidget(discount_lbl)
+        layout.addLayout(right)
+
+        return frame
+
+    def get_product(self):
+        # запрос с джоинами: связали ли мы справочники?
+        sql = """
+            select p.id, p.article, c.name, p.name, p.description, m.name, s.name,
+                   p.price, p.unit, p.stock, p.discount, p.image_path
+            from products p
+            left join categories c on p.category_id = c.id
+            left join manufacturers m on p.manufacturer_id = m.id
+            left join suppliers s on p.supplier_id = s.id
+        """
+        rows = list(db.select_all(sql))
+
+        if self.search_edit:
+            text = self.search_edit.text().lower()
+            if text != "":
+                rows = [r for r in rows if text in str(r).lower()]
+
+        if self.sort_combo and self.sort_combo.currentIndex() != 0:
+            # сортировка по количеству: в какую сторону крутить карточки?
+            s = self.sort_combo.currentText()
+            if s == "Количество по возрастанию":
+                rows.sort(key=lambda x: x[9])
+            elif s == "Количество по убыванию":
+                rows.sort(key=lambda x: x[9], reverse=True)
+
+        if self.price_combo and self.price_combo.currentIndex() != 0:
+            # сортировка по цене: дорогой или дешевый товар ищем?
+            s = self.price_combo.currentText()
+            if s == "Цена по возрастанию":
+                rows.sort(key=lambda x: x[7])
+            elif s == "Цена по убыванию":
+                rows.sort(key=lambda x: x[7], reverse=True)
+
+        if self.discount_combo and self.discount_combo.currentIndex() != 0:
+            # сортировка по скидке: где у нас максимальная выгода?
+            s = self.discount_combo.currentText()
+            if s == "Скидка по возрастанию":
+                rows.sort(key=lambda x: x[10])
+            elif s == "Скидка по убыванию":
+                rows.sort(key=lambda x: x[10], reverse=True)
+
+        if self.supplier_combo:
+            sup = self.supplier_combo.currentText()
+            if sup != "Все поставщики":
+                rows = [r for r in rows if r[6] == sup]
+
+        return rows
+
+    def show_product(self):
+        self.clear_layout(self.product_layout)
+        for product in self.get_product():
+            self.product_layout.addWidget(self.product_card(product))
+
+    def add_product(self):
+        dialog = ProductDialog()
+        if not dialog.exec():
+            return
+
+        data = dialog.get_data()
+        cat_id = get_or_create_id("categories", data[1])
+        man_id = get_or_create_id("manufacturers", data[4])
+        sup_id = get_or_create_id("suppliers", data[5])
+        disc_val = get_discount_number(data[9])
+
+        # сохранение нового товара: занесли ли внешние ключи?
+        sql = """
+            insert into products (article, name, description, price, unit, stock, discount, image_path, category_id, manufacturer_id, supplier_id)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        db.execute(sql, (data[0], data[2], data[3], data[6], data[7], data[8], disc_val, data[10], cat_id, man_id, sup_id))
+        self.set_status("Товар добавлен")
+        self.refresh_tab()
+
+    def edit_product(self, old_product):
+        dialog = ProductDialog(old_product)
+        if not dialog.exec():
+            return
+
+        data = dialog.get_data()
+        cat_id = get_or_create_id("categories", data[1])
+        man_id = get_or_create_id("manufacturers", data[4])
+        sup_id = get_or_create_id("suppliers", data[5])
+        disc_val = get_discount_number(data[9])
+
+        sql = """
+            update products
+            set article=%s, name=%s, description=%s, price=%s, unit=%s, stock=%s, discount=%s, image_path=%s,
+                category_id=%s, manufacturer_id=%s, supplier_id=%s
+            where id=%s
+        """
+
+        # список параметров: тут тоже ровно 12 элементов?
+        params = (
+            data[0],  # 1. артикул
+            data[2],  # 2. имя
+            data[3],  # 3. описание
+            data[6],  # 4. цена
+            data[7],  # 5. ед изм
+            data[8],  # 6. кол во
+            disc_val,  # 7. скидка числом
+            data[10],  # 8. фото путь
+            cat_id,  # 9. айди категории
+            man_id,  # 10. айди производителя
+            sup_id,  # 11. айди поставщика
+            old_product[0]  # 12. уникальный айди из where
+        )
+
+        db.execute(sql, params)
+        self.set_status("Товар изменен")
+        self.refresh_tab()
+
+    def delete_product(self, product):
+        # проверка состава: есть ли этот товар в заказах?
+        in_order = db.select_all("select * from order_items where product_id=%s", (product[0],))
+        if in_order:
+            QMessageBox.warning(self, "Предупреждение", "Товар есть в заказах")
+            return
+
+        answer = QMessageBox.question(self, "Удаление", "Точно ли удалить товар")
+        if answer == QMessageBox.StandardButton.Yes:
+            db.execute("delete from products where id=%s", (product[0],))
+            self.set_status("Товар удален")
+            self.refresh_tab()
+
+    def order_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        card_layout = QVBoxLayout()
+        content = QWidget()
+        content.setLayout(card_layout)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+
+        # выгрузка заказов: подтянулись ли логины клиентов?
+        sql = """
+            select o.id, concat('Заказ №', o.id), s.name, o.address, o.order_date, o.delivery_date, u.login, 'Состав заказа'
+            from orders o
+            join users u on o.user_id = u.id
+            join order_statuses s on o.status_id = s.id
+            order by o.id desc
+        """
+        orders = db.select_all(sql)
+
+        for order in orders:
+            card_layout.addWidget(self.order_card(order))
+
+        card_layout.addStretch()
+        layout.addWidget(scroll)
+        return page
+
+    def order_card(self, order):
+        frame = QFrame()
+        frame.setFrameShape(QFrame.Shape.Box)
+
+        layout = QHBoxLayout(frame)
+
+        left = QVBoxLayout()
+        left.addWidget(QLabel("ID: " + str(order[0])))
+        left.addWidget(QLabel("<b>" + str(order[1]) + "</b>"))
+        left.addWidget(QLabel("Статус: " + str(order[2])))
+        left.addWidget(QLabel("Адрес: " + str(order[3])))
+        left.addWidget(QLabel("Дата заказа: " + str(order[4])))
+        left.addWidget(QLabel("Пользователь: " + str(order[6])))
+        left.addWidget(QLabel("Состав: " + str(order[7])))
+
+        delivery = QLabel("Дата доставки\n" + str(order[5]))
+        delivery.setFixedWidth(120)
+        delivery.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        delivery.setStyleSheet("border:1px solid gray")
+        delivery.setWordWrap(True)
+
+        right = QVBoxLayout()
+        if self.role == "Администратор":
+            b1 = QPushButton("Удалить заказ")
+            b1.clicked.connect(lambda: self.delete_order(order))
+            right.addWidget(b1)
+
+        right.addStretch()
+
+        layout.addLayout(left)
+        layout.addWidget(delivery)
+        layout.addLayout(right)
+
+        return frame
+
+    def delete_order(self, order):
+        answer = QMessageBox.question(self, "Удаление", "Точно ли удалить заказ")
+        if answer == QMessageBox.StandardButton.Yes:
+            db.execute("delete from orders where id=%s", (order[0],))
+            self.set_status("Заказ удален")
+            self.refresh_tab()
+
+    def go_back(self):
+        self.close()
+        open_login()
+
+
+def open_login():
+    global main_window
+    dialog = LoginDialog()
+    if dialog.exec():
+        main_window = MainWindow(dialog.selected_role, dialog.selected_user)
+        main_window.show()
+    else:
+        QApplication.instance().quit()
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    open_login()
+    sys.exit(app.exec())
+
+
+
+
+
+
+
+
+
+
+
